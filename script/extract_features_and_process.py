@@ -387,7 +387,7 @@ def main():
                         type=int, default=4,
                         help="thread num")
     parser.add_argument("--limit",
-                        type=int, default=0,
+                        type=int, default=-1,
                         help="limit the num of data generate")
     parser.add_argument("--layer_mode",
                         type=str, default='sum',
