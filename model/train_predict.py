@@ -45,6 +45,8 @@ def main():
                        action='store_true', default=False)
     group.add_argument('--do_predict', help="do_predict",
                        action='store_true', default=False)
+    parser.add_argument('--undo_train_valid', help="undo train data as valid",
+                        action='store_true', default=False)
 
     parser.add_argument('--input', help="input dir or file",
                         type=str, required=True)
@@ -59,8 +61,8 @@ def main():
                         type=float, default=0.2)
     parser.add_argument('--batch_size', help="batch size od data",
                         type=int, default=32)
-    parser.add_argument('--lstm_size', help="set the lstm size",
-                        type=int, default=1068)
+    parser.add_argument('--hidden_size', help="set the hidden size",
+                        type=int, default=128)
     parser.add_argument('--epochs', help="epochs of train",
                         type=int, default=100)
     parser.add_argument('--train_ratio',
@@ -87,25 +89,26 @@ def main():
     parser.add_argument('--head_num', help="set the head num",
                         type=int, default=8)
     parser.add_argument('--vip', help="the ip or domain of visdom server",
-                        type=str, default='10.60.1.77')
+                        type=str, default='10.61.1.245')
+    parser.add_argument('--env', help="the name of env of visdom",
+                        type=str, default='ner')
     args = parser.parse_args()
 
     params['dropout'] = args.dropout
     params['use_glove'] = args.use_glove
     params['bert_dim'] = args.bert_dim
     params['mode_type'] = args.mode_type
+    params['hidden_size'] = args.hidden_size
     # just for transformer
     params['te_dropout'] = args.te_dropout
     params['head_num'] = args.head_num
-    # just for lstm
-    params['lstm_size'] = args.lstm_size
 
     model_time_str = args.model_name + '_' + bu.get_time_str()
 
     log = bu.get_logger(model_time_str)
 
     if args.vip:
-        vis = visdom.Visdom(args.vip, env='ner')
+        vis = visdom.Visdom(args.vip, env=args.env)
     else:
         vis = None
 
@@ -152,6 +155,13 @@ def main():
                                      shuffle=True, collate_fn=collate_fn,
                                      drop_last=True)
 
+        if not args.undo_train_valid:
+            sampler = tud.RandomSampler(data_source=dataset,
+                                        replacement=True,
+                                        num_samples=5000)
+        else:
+            sampler = None
+
         log.info('begin to train')
         Path(params['checkpoint']).mkdir(parents=True, exist_ok=True)
         monitor_best = 0
@@ -160,9 +170,12 @@ def main():
         loss_train_epoch = []
         loss_valid_epoch = []
         loss_train_t = []
+        loss_train_valid = []
 
         f1_dev_org = []
         f1_dev_per = []
+        f1_train_org = []
+        f1_train_per = []
         for epoch in range(args.epochs):
             loss_train = []
 
@@ -190,10 +203,16 @@ def main():
 
                 loss_train.append(step_loss)
                 loss_train_t.append(step_loss)
-                plot(vis, loss_train_t, args.model_name)
+                plot(vis, loss_train_t, args.model_name, ['train_loss'])
 
-            # metrics_t, loss_valid = evaluate(collate_fn, model, tag_to_ix,
-            #                                  params, 'test', get_loss=True)
+            if sampler:
+                meo_, met_, loss_valid_ = evaluate(collate_fn, model, args,
+                                                   'test', tag_to_ix,
+                                                   idx_to_tag, True, True,
+                                                   dataset_in=dataset)
+                f1_train_org.append(meo_[args.monitor])
+                f1_train_per.append(met_[args.monitor])
+                loss_train_valid.append(np.mean(loss_valid_))
 
             meo, met, loss_valid = evaluate(collate_fn, model, args, 'test',
                                             tag_to_ix, idx_to_tag, True, True)
@@ -203,10 +222,19 @@ def main():
             f1_dev_org.append(meo[args.monitor])
             f1_dev_per.append(met[args.monitor])
 
-            plot(vis, zip(loss_train_epoch, loss_valid_epoch, f1_dev_org,
-                          f1_dev_per), args.model_name, True)
+            if sampler:
+                legend = ['train_loss', 'valid_loss', 'f1_org', 'f1_per',
+                          'f1_org_t', 'f1_per_t', 'train_loss_t']
+                x_in = zip(loss_train_epoch, loss_valid_epoch, f1_dev_org,
+                           f1_dev_per, f1_train_org, f1_train_per,
+                           loss_train_valid)
 
-            # metrics_t = evaluate(collate_fn, model, tag_to_ix, params, 'train')
+            else:
+                legend = ['train_loss', 'valid_loss', 'f1_org', 'f1_per']
+                x_in = zip(loss_train_epoch, loss_valid_epoch, f1_dev_org,
+                           f1_dev_per)
+            plot(vis, x_in, args.model_name, legend)
+
             log.info(f'valid:{meo}{met}')
             if meo[args.monitor] > monitor_best or monitor_best == 0:
                 monitor_best = meo[args.monitor]
@@ -261,44 +289,55 @@ def main():
         log.info(f'org:{meo} per:{met}')
 
 
-def plot(vis, x, model_name, valid_and_train=False):
-    x = [item for item in x]
+def plot(vis, x, model_name, legend=None):
     if vis:
-        legend = ['train_loss']
-        if valid_and_train:
-            legend = ['train_loss', 'valid_loss', 'f1_org', 'f1_per']
+        x = [item for item in x]
         vis.line(
             X=np.arange(start=0, stop=len(x)),
             Y=x,
             opts={
                 'legend': legend,
-                'title': f'{model_name} loss line',
+                'title': f'{model_name} loss line{len(legend)}',
                 'ylabel': 'loss',
                 'xlabel': 'step index',
 
             },
-            win=f'loss_{valid_and_train}_{model_name}',
+            win=f'loss_{"".join(legend)}_{model_name}',
         )
 
 
-def evaluate(collate_fn, model, args, valid_status,
-             tag_to_ix=None, idx_to_tag=None,
-             fpr=True, get_loss=False, output_file=None, ):
-    with torch.no_grad():
-        input_dir = args.input
-        limit = args.limit
-        ratio = args.train_ratio
-        if valid_status != 'train' and ratio > 0:
-            limit //= ratio
-            mod_index = [0]
-        else:
-            mod_index = [i + 1 for i in range(ratio)]
+dataset_map = {}
 
-        dataset_train = data_provider.BBNDatasetCombine(input_dir, mod_index,
-                                                        ratio + 1, limit)
-        data_loader = tud.DataLoader(dataset_train, args.batch_size,
+
+def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
+             idx_to_tag=None, fpr=True, get_loss=False, output_file=None,
+             dataset_in=None, sampler=None):
+    with torch.no_grad():
+
+        if dataset_in:
+            dataset_ = dataset_in
+        else:
+            input_dir = args.input
+            limit = args.limit
+            ratio = args.train_ratio
+            if valid_status != 'train' and ratio > 0:
+                limit //= ratio
+                mod_index = [0]
+            else:
+                mod_index = [i + 1 for i in range(ratio)]
+            data_id = f'{input_dir}_{ratio}_{limit}_{mod_index}'
+            if data_id in dataset_map:
+                dataset_ = dataset_map[data_id]
+            else:
+                # input_dir, mode='train', get_indexs=None, num=1, limit=0
+                dataset_ = data_provider.BBNDatasetCombine(input_dir,
+                                                           mod_index,
+                                                           ratio + 1, limit)
+                dataset_map[data_id] = dataset_
+
+        data_loader = tud.DataLoader(dataset_, args.batch_size,
                                      shuffle=False, collate_fn=collate_fn,
-                                     drop_last=True)
+                                     drop_last=True, sampler=sampler)
         ss = []
         ss_error = []
         loss = []

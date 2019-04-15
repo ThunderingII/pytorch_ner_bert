@@ -9,6 +9,28 @@ import model.crf as crf
 torch.manual_seed(2019)
 
 
+# gelu activation function
+def gelu(x):
+    return x * torch.sigmoid(1.702 * x)
+
+
+activate_fn_map = {'gelu': gelu, 'sigmoid': nn.functional.sigmoid,
+                   'relu': nn.functional.relu, }
+
+
+class Linear(nn.Module):
+    def __init__(self, dim_in, dim_out, activate_fn='gelu', bias=True):
+        super(Linear, self).__init__()
+        self.activate_fn = activate_fn
+        self.linear = nn.Linear(dim_in, dim_out, bias)
+
+    def forward(self, feats):
+        if self.activate_fn and self.activate_fn in activate_fn_map:
+            return activate_fn_map[self.activate_fn](self.linear(feats))
+        else:
+            return self.linear(feats)
+
+
 # Create model
 class Bert_CRF(nn.Module):
 
@@ -34,21 +56,26 @@ class Bert_CRF(nn.Module):
         else:
             self.embedding_dim = params['bert_dim']
 
-        self.hidden_dim = self.embedding_dim
+        self.hidden_dim = params['hidden_size']
+
+        if self.hidden_dim != self.embedding_dim:
+            self.te_linear = Linear(self.embedding_dim, self.hidden_dim)
+        else:
+            self.te_linear = None
+
         # select model
         if self.mode_type == 'b':
-            self.hidden_dim = params['lstm_size']
             self.lstm = nn.LSTM(self.embedding_dim, self.hidden_dim // 2,
                                 num_layers=1, bidirectional=True)
         elif self.mode_type == 't':
-            self.te = transformer.TransformerEncode(self.embedding_dim,
+            self.te = transformer.TransformerEncode(self.hidden_dim,
                                                     self.head_num,
                                                     self.te_dropout)
         elif self.mode_type == 'bt':
-            self.te1 = transformer.TransformerEncode(self.embedding_dim,
+            self.te1 = transformer.TransformerEncode(self.hidden_dim,
                                                      self.head_num,
                                                      self.te_dropout, False)
-            self.te2 = transformer.TransformerEncode(self.embedding_dim,
+            self.te2 = transformer.TransformerEncode(self.hidden_dim,
                                                      self.head_num,
                                                      self.te_dropout, False,
                                                      False)
@@ -102,6 +129,9 @@ class Bert_CRF(nn.Module):
         mask_x = mask_x.transpose(0, 1)
 
         if self.mode_type == 'c':
+            if self.te_linear:
+                embeds = self.te_linear(embeds)
+
             # only use crf
             return self.hidden2tag(embeds), len_w, mask_x
         elif self.mode_type == 'b':
@@ -115,12 +145,17 @@ class Bert_CRF(nn.Module):
             outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(
                 lstm_out)
         elif self.mode_type == 't':
-            # use transformer
+            if self.te_linear:
+                embeds = self.te_linear(embeds)
 
+            # use transformer
             te_output = self.te(embeds, mask_x)
             # transpose to seq_len * batch_size * embed_size
             outputs = te_output.transpose(0, 1)
         elif self.mode_type == 'bt':
+            if self.te_linear:
+                embeds = self.te_linear(embeds)
+
             te_output = self.te1(embeds, mask_x)
             te_output = self.te2(te_output, mask_x)
             # transpose to seq_len * batch_size * embed_size
