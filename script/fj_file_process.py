@@ -1,5 +1,6 @@
 import json
 import re
+import pathlib
 import util.base_util as bu
 
 log = bu.get_logger(__name__)
@@ -37,11 +38,20 @@ def get_kw():
 def parse_news():
     exist_set = set()
     kw_p = get_kw_pattern()
-    with open('../data/origin/fj_platform.txt') as fs, open(
-            '../data/processed/fj_platform.txt', 'w') as result_file:
+
+    file_size = 32
+
+    outputs = []
+    path = pathlib.Path('../data/processed/fj_kw')
+    path.mkdir(parents=True, exist_ok=True)
+    for i in range(file_size):
+        f = pathlib.Path(path, f'fj_platform{i}.txt').open('w',
+                                                           encoding='utf-8')
+        outputs.append(f)
+
+    with open('../data/origin/fj_platform.txt') as fs:
         for line in fs:
             j_data = json.loads(line)
-            kw = j_data['entity']
             for d in j_data['doc']:
                 try:
                     org_re = kw_p
@@ -60,6 +70,7 @@ def parse_news():
                                 exist_set.add(imd5)
 
                             orgs = []
+                            fi = -1
                             if org_re:
                                 for m in re.finditer(org_re, i):
                                     s, e = m.span()
@@ -68,10 +79,14 @@ def parse_news():
                                         print(s, e)
                                         print(org_re)
                                     else:
+                                        kw = m.group()
+                                        if fi < 0:
+                                            fi = bu.get_str_index(kw,
+                                                                  file_size)
                                         orgs.append(m.span())
                             if orgs:
-                                result_file.write(i + '\n')
-                                result_file.write(f'{orgs}{[]}\n')
+                                outputs[fi].write(i + '\n')
+                                outputs[fi].write(f'{orgs}{[]}\n')
                 # log.info(f'PN:{f} success!')
                 except Exception as e:
                     import traceback
@@ -80,4 +95,5 @@ def parse_news():
 
 
 if __name__ == '__main__':
-    get_kw()
+    # get_kw()
+    parse_news()
