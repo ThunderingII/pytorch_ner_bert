@@ -92,6 +92,9 @@ def main():
                         type=str, default='10.61.1.245')
     parser.add_argument('--env', help="the name of env of visdom",
                         type=str, default='ner')
+
+    parser.add_argument('--pre_model_path', help="the pre model path",
+                        type=str, default='')
     args = parser.parse_args()
 
     params['dropout'] = args.dropout
@@ -135,6 +138,12 @@ def main():
 
     model = Bert_CRF(tag_to_ix, params, device)
     model.to(device)
+
+    if args.pre_model_path:
+        with Path(args.pre_model_path).open('rb') as mp:
+            best_state_dict, _, _ = pickle.load(mp)
+            model.load_state_dict(best_state_dict, False)
+
     optimizer = optim.Adam(model.parameters(), lr=args.lr,
                            weight_decay=args.wd)
 
@@ -266,9 +275,6 @@ def main():
         with Path(fn).open('rb') as mp:
             best_state_dict, params, tag_to_ix = pickle.load(mp)
 
-        # change batch_size to 1
-        args.batch_size = 1
-
         if args.gpu_index > -1:
             device = torch.device(f'cuda:{args.gpu_index}')
         else:
@@ -276,6 +282,9 @@ def main():
         model = Bert_CRF(tag_to_ix, params, device)
         model.to(device)
         model.load_state_dict(best_state_dict, strict=False)
+
+        # change batch_size to 1
+        args.batch_size = 1
 
         # model, bert_dim, tag_to_ix, word_to_ix, rw, batch
         collate_fn = functools.partial(data_provider.collect_fn, model,
