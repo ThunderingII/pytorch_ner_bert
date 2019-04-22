@@ -76,7 +76,7 @@ def main():
                         type=str, default='ner_model_crf')
     parser.add_argument('--mode_type',
                         help="choose transformer(t) or biLstm(b) or only crf(c)",
-                        choices=['b', 't', 'c', 'bt'],
+                        choices=['b', 't', 'c', 'bt', 'cnn'],
                         type=str, default='b')
     parser.add_argument('--bert_dim', help="bert dim",
                         type=int, default=768)

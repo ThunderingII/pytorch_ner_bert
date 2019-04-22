@@ -31,6 +31,28 @@ class Linear(nn.Module):
             return self.linear(feats)
 
 
+class ConvBlock(nn.Module):
+    def __init__(self, in_s, out_s, dil=1, win=3):
+        super(ConvBlock, self).__init__()
+        pad = dil * (win - 1) // 2
+        self.conv1 = nn.Conv1d(in_s, out_s, win, 1, pad, dil)
+        self.conv2 = nn.Conv1d(in_s, out_s, win, 1, pad, dil)
+        self.use_x = in_s == out_s
+
+    def forward(self, x_in):
+        """
+        :param x_in: [N, C, L]
+        :return: [batch_size, embed_size, seq_len]
+        """
+        x1 = self.conv1(x_in)
+        x2 = self.conv2(x_in)
+        sigma = torch.sigmoid(x2)
+        x_conv = x1 * sigma
+        if self.use_x:
+            x_conv += x_in
+        return x_conv
+
+
 # Create model
 class Bert_CRF(nn.Module):
 
@@ -79,6 +101,11 @@ class Bert_CRF(nn.Module):
                                                      self.head_num,
                                                      self.te_dropout, False,
                                                      False)
+        elif self.mode_type == 'cnn':
+            self.linear = Linear(self.embedding_dim, self.hidden_dim)
+            self.conv_1 = ConvBlock(self.hidden_dim, self.hidden_dim)
+            self.conv_2 = ConvBlock(self.hidden_dim, self.hidden_dim, dil=2)
+            self.conv_4 = ConvBlock(self.hidden_dim, self.hidden_dim, dil=4)
 
         self.crf = crf.CRF(tag_to_ix, device, False)
         self.dropout_layer = nn.Dropout(params['dropout'])
@@ -160,6 +187,14 @@ class Bert_CRF(nn.Module):
             te_output = self.te2(te_output, mask_x)
             # transpose to seq_len * batch_size * embed_size
             outputs = te_output.transpose(0, 1)
+        elif self.mode_type == 'cnn':
+            # [N, L, C]
+            outputs = self.linear(embeds).transpose(1, 2)
+            # [N, C, L]
+            outputs = self.conv_1(outputs)
+            outputs = self.conv_2(outputs)
+            # [L, N, C]
+            outputs = self.conv_4(outputs).permute(2, 0, 1)
 
         # after liner layer: seq_len, batch, tag_size
         hidden_feats = self.hidden2tag(self.dropout_layer(outputs))
