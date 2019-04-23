@@ -66,6 +66,7 @@ class Bert_CRF(nn.Module):
         self.mode_type = params['mode_type']
         self.head_num = params['head_num']
         self.te_dropout = params['te_dropout']
+        self.use_cross_entropy = params['use_cross_entropy']
 
         if self.use_glove:
             # glove word embeddings
@@ -107,7 +108,10 @@ class Bert_CRF(nn.Module):
             self.conv_2 = ConvBlock(self.hidden_dim, self.hidden_dim, dil=2)
             self.conv_4 = ConvBlock(self.hidden_dim, self.hidden_dim, dil=4)
 
-        self.crf = crf.CRF(tag_to_ix, device, False)
+        if self.use_cross_entropy:
+            self.cross_entropy = nn.CrossEntropyLoss(reduction='none')
+        else:
+            self.crf = crf.CRF(tag_to_ix, device, False)
         self.dropout_layer = nn.Dropout(params['dropout'])
         self.hidden2tag = nn.Linear(self.hidden_dim, self.tagset_size)
 
@@ -192,9 +196,9 @@ class Bert_CRF(nn.Module):
             outputs = self.linear(embeds).transpose(1, 2)
             # [N, C, L]
             outputs = self.conv_1(outputs)
-            outputs = self.conv_2(outputs)
+            outputs = self.conv_2(outputs).permute(2, 0, 1)
             # [L, N, C]
-            outputs = self.conv_4(outputs).permute(2, 0, 1)
+            # outputs = self.conv_4(outputs).permute(2, 0, 1)
 
         # after liner layer: seq_len, batch, tag_size
         hidden_feats = self.hidden2tag(self.dropout_layer(outputs))
@@ -204,10 +208,29 @@ class Bert_CRF(nn.Module):
     def neg_log_likelihood(self, words, words_ids, len_w, tags):
         feats, len_w, mask_x = self._get_hidden_features(words, words_ids,
                                                          len_w)
-        return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
+        if self.use_cross_entropy:
+            seq_len, batch_size, _ = feats.size()
+            # change to [batch_size, seq_len, embed_size]
+            feats, mask_x = feats.transpose(0, 1), mask_x.transpose(0, 1)
+            feats = feats.contiguous().view(-1, self.tagset_size)
+            tags = tags.contiguous().view(-1)
+            loss = self.cross_entropy(feats, tags).view(batch_size,
+                                                        seq_len) * mask_x.float()
+            return torch.mean(loss, -1)
+        else:
+            return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
 
     def forward(self, words, words_ids, len_w):
         # Get the emission scores from the BiLSTM
         feats, len_w, mask_x = self._get_hidden_features(words, words_ids,
                                                          len_w)
-        return self.crf(feats, mask_x, len_w)
+        if self.use_cross_entropy:
+            # change to [batch_size, seq_len, embed_size]
+            feats = feats.transpose(0, 1)
+            res = []
+            feats_np = torch.argmax(feats, -1).cpu().numpy()
+            for i, f_bs in enumerate(feats_np):
+                res.append(f_bs[:len_w[i]])
+            return np.zeros(feats.size()[0]), res
+        else:
+            return self.crf(feats, mask_x, len_w)

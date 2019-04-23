@@ -95,6 +95,8 @@ def main():
 
     parser.add_argument('--pre_model_path', help="the pre model path",
                         type=str, default='')
+    parser.add_argument('--use_cross_entropy', help="use cross entropy loss",
+                        action='store_true', default=False)
     args = parser.parse_args()
 
     params['dropout'] = args.dropout
@@ -105,6 +107,7 @@ def main():
     # just for transformer
     params['te_dropout'] = args.te_dropout
     params['head_num'] = args.head_num
+    params['use_cross_entropy'] = args.use_cross_entropy
 
     model_time_str = args.model_name + '_' + bu.get_time_str()
 
@@ -123,7 +126,10 @@ def main():
                 if word not in word_to_ix:
                     word_to_ix[word] = len(word_to_ix)
 
-    tag_to_ix = {'O': 0, START_TAG: 1, STOP_TAG: 2}
+    if args.use_cross_entropy:
+        tag_to_ix = {'O': 0}
+    else:
+        tag_to_ix = {'O': 0, START_TAG: 1, STOP_TAG: 2}
     with open(params['tags']) as wvf:
         for tag in wvf:
             tag = tag.strip()
@@ -150,6 +156,7 @@ def main():
     # begin to train model
     step_index = 0
     if args.do_train:
+
         # model, bert_dim, tag_to_ix, word_to_ix, rw, batch
         collate_fn = functools.partial(data_provider.collect_fn, model,
                                        params['bert_dim'],

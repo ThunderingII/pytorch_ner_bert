@@ -118,7 +118,10 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
             words_ids_batch[ni][i] = size + i
             if word_to_ix:
                 words_batch[ni][i] = word_to_ix[words[i]]
-            tags_batch[ni][i] = tag_to_ix[tags[i]]
+            if tags[i] in tag_to_ix:
+                tags_batch[ni][i] = tag_to_ix[tags[i]]
+            else:
+                tags[i] = 'O'
         size += len_w
         if rw:
             words_batch[ni] = words
