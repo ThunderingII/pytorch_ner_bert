@@ -6,24 +6,18 @@ STOP_TAG = '<STOP>'
 
 
 class CRF(nn.Module):
-    def __init__(self, tag_to_ix, device, batch_first):
+    def __init__(self, tag_size, device, batch_first):
         super().__init__()
         self.batch_first = batch_first
 
-        if START_TAG not in tag_to_ix:
-            tag_to_ix[START_TAG] = len(tag_to_ix)
-        if STOP_TAG not in tag_to_ix:
-            tag_to_ix[STOP_TAG] = len(tag_to_ix)
-        self.tag_to_ix = tag_to_ix
-
-        self.tagset_size = len(self.tag_to_ix)
+        self.tagset_size = tag_size
         t = torch.randn(self.tagset_size, self.tagset_size, device=device)
         self.transitions = nn.Parameter(t)
 
-        # These two statements enforce the constraint that we never transfer
-        # to the start tag and we never transfer from the stop tag
-        self.transitions.data[tag_to_ix[START_TAG], :] = -10000
-        self.transitions.data[:, tag_to_ix[STOP_TAG]] = -10000
+        self.start_tag = nn.Parameter(
+            torch.randn(self.tagset_size, device=device))
+        self.end_tag = nn.Parameter(
+            torch.randn(self.tagset_size, device=device))
 
     def _score_sentence(self, feats, tags, mask_x, len_seq):
         """
@@ -36,22 +30,17 @@ class CRF(nn.Module):
 
         bs = feats.size()[1]
         # Gives the score of a provided tag sequence
-        score = torch.zeros(bs, device=feats.device)
+        score = self.start_tag[tags[:, 0]] + feats[0][
+            torch.arange(bs), tags[:, 0]]
 
-        start_tags = torch.full((bs, 1), self.tag_to_ix[START_TAG],
-                                dtype=torch.int64, device=feats.device)
-        stop_tags = torch.full((bs,), self.tag_to_ix[STOP_TAG],
-                               dtype=torch.int64, device=feats.device)
-
-        tags = torch.cat([start_tags, tags], -1)
-        for i, feat in enumerate(feats):
+        for i in range(1, len(feats)):
+            feat = feats[i]
             mask = mask_x[i]
-            n_socre = score + self.transitions[tags[:, i + 1], tags[:, i]] + \
-                      feat[torch.arange(bs), tags[:, i + 1]]
+            n_socre = score + self.transitions[tags[:, i - 1], tags[:, i]] + \
+                      feat[torch.arange(bs), tags[:, i]]
             score = torch.where(mask, n_socre, score)
 
-        score += self.transitions[
-            stop_tags, tags[torch.arange(bs), len_seq]]
+        score += self.start_tag[tags[:, len_seq - 1]]
 
         return score
 
@@ -62,12 +51,8 @@ class CRF(nn.Module):
         :return:
         '''
 
-        bs = feats.size()[1]
-        # [batch_size,n_labels]
-        score = torch.full((bs, self.tagset_size), -10000.,
-                           device=feats.device)
-        # START_TAG has all of the score.
-        score[:, self.tag_to_ix[START_TAG]] = 0.
+        # [1, n_labels]
+        score = self.start_tag.unsqueeze(0)
 
         # Iterate through the sentence
         for i, feat in enumerate(feats):

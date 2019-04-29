@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import model.transformer as transformer
-import model.crf as crf
+import model.crf_o as crf
 
 torch.manual_seed(2019)
 
@@ -111,7 +111,7 @@ class Bert_CRF(nn.Module):
         if self.use_cross_entropy:
             self.cross_entropy = nn.CrossEntropyLoss(reduction='none')
         else:
-            self.crf = crf.CRF(tag_to_ix, device, False)
+            self.crf = crf.CRF(self.tagset_size, device, False)
         self.dropout_layer = nn.Dropout(params['dropout'])
         self.hidden2tag = nn.Linear(self.hidden_dim, self.tagset_size)
 
@@ -216,8 +216,10 @@ class Bert_CRF(nn.Module):
             tags = tags.contiguous().view(-1)
             loss = self.cross_entropy(feats, tags).view(batch_size,
                                                         seq_len) * mask_x.float()
-            return torch.mean(loss, -1)
+
+            return torch.sum(loss, -1) / len_w
         else:
+            tags = tags.transpose(0, 1)
             return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
 
     def forward(self, words, words_ids, len_w):

@@ -126,10 +126,7 @@ def main():
                 if word not in word_to_ix:
                     word_to_ix[word] = len(word_to_ix)
 
-    if args.use_cross_entropy:
-        tag_to_ix = {'O': 0}
-    else:
-        tag_to_ix = {'O': 0, START_TAG: 1, STOP_TAG: 2}
+    tag_to_ix = {'O': 0}
     with open(params['tags']) as wvf:
         for tag in wvf:
             tag = tag.strip()
@@ -225,7 +222,8 @@ def main():
                 meo_, met_, loss_valid_ = evaluate(collate_fn, model, args,
                                                    'test', tag_to_ix,
                                                    idx_to_tag, True, True,
-                                                   dataset_in=dataset)
+                                                   dataset_in=dataset,
+                                                   sampler=sampler)
                 f1_train_org.append(meo_[args.monitor])
                 f1_train_per.append(met_[args.monitor])
                 loss_train_valid.append(np.mean(loss_valid_))
