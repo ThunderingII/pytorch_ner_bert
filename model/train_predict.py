@@ -193,7 +193,8 @@ def main():
             loss_train = []
 
             # index_batch, words_batch, words_ids_batch, len_w_batch, tags_batch
-            for i, w, wi, l, t in data_loader:
+            # sentence_batch
+            for i, w, wi, l, t, _ in data_loader:
                 # Step 1. Remember that Pytorch accumulates gradients.
                 model.zero_grad()
 
@@ -364,7 +365,7 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
         total_correct_per = 0
 
         finish_size = 0
-        for ots, w, wi, l, t in data_loader:
+        for ots, w, wi, l, t, sentences in data_loader:
             if (finish_size + 1) % 1000 == 0:
                 print(f'finish {finish_size + 1}')
 
@@ -407,14 +408,15 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
                     total_correct_per += len(pers_t_set)
 
                 if output_file:
-                    text = ''.join(w[i][:len(ot)])
+                    text = sentences[i]
                     ss.append(text)
                     if fpr and orgs_t_set != orgs_p_set:
                         ss_error.append(text)
                         ts = []
                         ps = []
                         for c in orgs_p_set - orgs_t_set:
-                            ps.append(''.join(w[i][c[1]:c[2]]))
+                            org = ''.join(w[i][c[1]:c[2]])
+                            ps.append(org)
                         for c in orgs_t_set - orgs_p_set:
                             ts.append(''.join(w[i][c[1]:c[2]]))
                         ss_error.append(f'tc:{orgs_t_set}, pc:{orgs_p_set}')
