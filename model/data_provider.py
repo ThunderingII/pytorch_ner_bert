@@ -111,8 +111,9 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
     words_ids_batch = np.zeros((batch_size, max_len), dtype=np.int64)
     tags_batch = np.zeros((batch_size, max_len), dtype=np.int64)
 
+    sentences_batch = [None for i in range(batch_size)]
     for ni, bi in enumerate(index_list):
-        _, words, words_emb_bert, tags, len_w = batch[bi]
+        _, words, words_emb_bert, tags, len_w, sentence = batch[bi]
         for i in range(len_w):
             bert_embedding[size + i] = words_emb_bert[i]
             words_ids_batch[ni][i] = size + i
@@ -125,6 +126,7 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
         size += len_w
         if rw:
             words_batch[ni] = words
+            sentences_batch[ni] = sentence
         origin_tags[ni] = tags
         len_w_batch[ni] = len_w
 
@@ -144,4 +146,4 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
     # get gpu tensor
     return ots, w_tensor, torch.from_numpy(wi).to(
         model.device), torch.from_numpy(l).to(model.device), torch.from_numpy(
-        t).to(model.device)
+        t).to(model.device), sentences_batch

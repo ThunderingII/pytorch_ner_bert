@@ -63,7 +63,7 @@ class InputFeatures(object):
     """A single set of features of data."""
 
     def __init__(self, unique_id, tokens, input_ids, input_mask,
-                 input_type_ids, orgs, pers):
+                 input_type_ids, orgs, pers, sentence):
         self.unique_id = unique_id
         self.tokens = tokens
         self.input_ids = input_ids
@@ -71,6 +71,7 @@ class InputFeatures(object):
         self.input_type_ids = input_type_ids
         self.orgs = orgs
         self.pers = pers
+        self.sentence = sentence
 
 
 def convert_examples_to_features(examples, seq_length, tokenizer):
@@ -168,7 +169,8 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
                 input_mask=input_mask,
                 input_type_ids=input_type_ids,
                 orgs=orgs,
-                pers=pers))
+                pers=pers,
+                sentence=example.text_a))
     return features
 
 
@@ -276,11 +278,11 @@ def build_feature(mpi, input_q, layer_indexes, features, output_file, mode):
         all_encoder_layers = [layer.numpy() for layer in
                               all_encoder_layers]
 
-        for i, embedding_e, token_e, tag_e, seq_len in process_embedding(
+        for i, embedding_e, token_e, tag_e, seq_len, st in process_embedding(
                 all_encoder_layers, example_indices, features,
                 layer_indexes, mode):
             # index, words, words_emb_bert, tags, len_w
-            out_list.append((i, token_e, embedding_e, tag_e, seq_len))
+            out_list.append((i, token_e, embedding_e, tag_e, seq_len, st))
 
 
 def process_embedding(all_encoder_layers, example_indices, features,
@@ -304,7 +306,7 @@ def process_embedding(all_encoder_layers, example_indices, features,
         rs = process_token(seq_embed, feature.orgs, feature.pers, seq_tokens)
         if rs:
             embedding_e, token_e, tag_e, len_w = rs
-            yield unique_id, embedding_e, token_e, tag_e, len_w
+            yield unique_id, embedding_e, token_e, tag_e, len_w, feature.sentence
         else:
             continue
 
