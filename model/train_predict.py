@@ -47,8 +47,9 @@ def main():
                        action='store_true', default=False)
     parser.add_argument('--undo_train_valid', help="undo train data as valid",
                         action='store_true', default=False)
-
     parser.add_argument('--input', help="input dir or file",
+                        type=str, required=True)
+    parser.add_argument('--valid_input', help="valid data input dir or file",
                         type=str, required=True)
     parser.add_argument('--output', help="output file dir for writing result",
                         type=str, default=params['output_dir'])
@@ -65,9 +66,7 @@ def main():
                         type=int, default=128)
     parser.add_argument('--epochs', help="epochs of train",
                         type=int, default=100)
-    parser.add_argument('--train_ratio',
-                        help="the value of train size/test size",
-                        type=int, default=5)
+
     parser.add_argument('--monitor', help="monitor f1,acc,precision or recall",
                         type=str, default='f1')
     parser.add_argument('--use_glove', help="denote whether use use_glove",
@@ -156,13 +155,10 @@ def main():
 
         # model, bert_dim, tag_to_ix, word_to_ix, rw, batch
         collate_fn = functools.partial(data_provider.collect_fn, model,
-                                       params['bert_dim'],
-                                       tag_to_ix, None, False)
-        train_index = [i + 1 for i in range(args.train_ratio)]
+                                       params['bert_dim'], tag_to_ix, None,
+                                       False)
         with bu.timer('load train data'):
             dataset = data_provider.BBNDatasetCombine(args.input,
-                                                      train_index,
-                                                      args.train_ratio + 1,
                                                       args.limit)
         data_loader = tud.DataLoader(dataset, args.batch_size,
                                      shuffle=True, collate_fn=collate_fn,
@@ -332,22 +328,17 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
         if dataset_in:
             dataset_ = dataset_in
         else:
-            input_dir = args.input
-            limit = args.limit
-            ratio = args.train_ratio
-            if valid_status != 'train' and ratio > 0:
-                limit //= ratio
-                mod_index = [0]
+            if valid_status != 'train':
+                input_dir = args.input
             else:
-                mod_index = [i + 1 for i in range(ratio)]
-            data_id = f'{input_dir}_{ratio}_{limit}_{mod_index}'
+                input_dir = args.valid_input
+            limit = args.limit
+            data_id = f'{input_dir}_{limit}'
             if data_id in dataset_map:
                 dataset_ = dataset_map[data_id]
             else:
-                # input_dir, mode='train', get_indexs=None, num=1, limit=0
-                dataset_ = data_provider.BBNDatasetCombine(input_dir,
-                                                           mod_index,
-                                                           ratio + 1, limit)
+                # input_dir, limit=0, from_one_file=True
+                dataset_ = data_provider.BBNDatasetCombine(input_dir, limit)
                 dataset_map[data_id] = dataset_
 
         data_loader = tud.DataLoader(dataset_, args.batch_size,
@@ -376,7 +367,6 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
                 loss.append(
                     model.neg_log_likelihood(w, wi, l, t).mean().item())
             for i, ot in enumerate(ots):
-
                 if fpr:
                     orgs_t_set = set()
                     orgs_p_set = set()

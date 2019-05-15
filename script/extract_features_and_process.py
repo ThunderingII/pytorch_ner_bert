@@ -351,11 +351,12 @@ def process_token(line_embedding, tags_orgs, tags_pers, line_tokens):
     except Exception as e:
         print('-' * 50)
         print(e)
-        print('line_embedding', len(line_embedding))
-        print(line_tokens)
+        print('line_embedding', len(line_embedding[1:-1]))
+        print(line_tokens[1:-1])
         print(tags_orgs, tags_pers)
-        print(token_e)
-        print(tag_e)
+        print('token:', len(token_e), token_e)
+        print('tag_e:', len(tag_e), tag_e)
+        print('em', len(embedding_e))
         print('*' * 50)
         return None
 

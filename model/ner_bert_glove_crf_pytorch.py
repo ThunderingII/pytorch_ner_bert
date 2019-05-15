@@ -219,8 +219,10 @@ class Bert_CRF(nn.Module):
 
             return torch.sum(loss, -1) / len_w
         else:
+            # tags = tags.transpose(0, 1)
+            # return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
             tags = tags.transpose(0, 1)
-            return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
+            return self.crf.get_labelwise_loss(feats, tags, mask_x, len_w)
 
     def forward(self, words, words_ids, len_w):
         # Get the emission scores from the BiLSTM

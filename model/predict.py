@@ -153,6 +153,7 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
                                      drop_last=True, sampler=sampler)
         ss = []
         ss_error = []
+        ss_result = []
         correct_preds_org = 0
         total_preds_org = 0
         total_correct_org = 0
@@ -162,7 +163,7 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
         total_correct_per = 0
 
         finish_size = 0
-        for index_batch, ots, w, wi, l, t in data_loader:
+        for _, ots, w, wi, l, t, sts in data_loader:
             if (finish_size + 1) % 1000 == 0:
                 print(f'finish {finish_size + 1}')
 
@@ -199,6 +200,9 @@ def evaluate(collate_fn, model, args, valid_status, tag_to_ix=None,
                     correct_preds_per += len(pers_t_set & pers_p_set)
                     total_preds_per += len(pers_p_set)
                     total_correct_per += len(pers_t_set)
+                if output_file:
+                    text = sts[i]
+
 
                 if output_file:
                     text = ''.join(w[i][:len(ot)])

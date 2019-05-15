@@ -335,3 +335,83 @@ class CRF(nn.Module):
             best_tags_list.append(best_tags)
 
         return score.cpu().numpy(), best_tags_list
+
+    def _labelwise_forward(self, emissions: torch.Tensor,
+                           mask: torch.ByteTensor):
+        seq_length = emissions.size(0)
+        # shape is [seq_len, batch_size, tag_size]
+        alpha_score = torch.zeros_like(emissions)
+        score = self.start_transitions + emissions[0]
+        alpha_score[0] = score
+        for i in range(1, seq_length):
+            broadcast_score = score.unsqueeze(2)
+            broadcast_emissions = emissions[i].unsqueeze(1)
+            # broadcast_score + broadcast_emissions
+            # [[s1],[s2],[s3]]     [[e1,e2,e3]]
+            # [s1+e1+t11,s1+e2+t12,s1+e3+t13]
+            # [s2+e1+t21,s2+e2+t22,s2+e3+t23]
+            # [s3+e1+t31,s3+e2+t32,s3+e3+t33]
+            next_score = broadcast_score + self.transitions + broadcast_emissions
+            next_score = torch.logsumexp(next_score, dim=1)
+            score = torch.where(mask[i].unsqueeze(1), next_score, score)
+            alpha_score[i] = score
+        return alpha_score
+
+    def _labelwise_backward(self, emissions: torch.Tensor,
+                            mask: torch.ByteTensor):
+        seq_length = emissions.size(0)
+        # shape is [seq_len, batch_size, tag_size]
+        beta_score = torch.zeros_like(emissions)
+        # change to [1,tag_size]
+        score = self.end_transitions.unsqueeze(0)
+        beta_score[-1] = score
+        for i in range(seq_length - 1)[::-1]:
+            broadcast_score = score.unsqueeze(1)
+            broadcast_emissions = emissions[i + 1].unsqueeze(1)
+            # broadcast_score + broadcast_emissions
+            # [[s1,s2,s3]]     [[e1,e2,e3]]
+            # [s1+e1+t11,s2+e2+t12,s3+e3+t13]
+            # [s1+e1+t21,s2+e2+t22,s3+e3+t23]
+            # [s1+e1+t31,s2+e2+t32,s3+e3+t33]
+            next_score = broadcast_score + broadcast_emissions + self.transitions
+            next_score = torch.logsumexp(next_score, dim=2)
+            # pay attention mask is i+1
+            score = torch.where(mask[i + 1].unsqueeze(1), next_score, score)
+            beta_score[i] = score
+        return beta_score
+
+    def get_labelwise_loss(self, emissions: torch.Tensor,
+                           tags: torch.LongTensor,
+                           mask: Optional[torch.ByteTensor] = None,
+                           len_w=None):
+
+        if self.batch_first:
+            emissions = emissions.transpose(0, 1)
+            tags = tags.transpose(0, 1)
+            mask = mask.transpose(0, 1)
+
+        alpha_score = self._labelwise_forward(emissions, mask)
+        beta_score = self._labelwise_backward(emissions, mask)
+
+        Q = torch.sigmoid
+
+        # seq_len, batch_size, tag_size
+        score = alpha_score + beta_score
+
+        # shape (batch_size, )
+        loss = torch.zeros((tags.size()[1])).to(emissions.device)
+
+        i = 0
+        # score = torch.nn.functional.softmax(score, -1)
+        # score = torch.softmax(score, -1)
+        for tag, Pw_pre in zip(tags, score):
+            # Pw_pre = torch.softmax(Pw_pre_, 1)
+            Pw = Pw_pre[torch.arange(end=len(tag)), tag]
+            # batch_size tag_size
+            # Pw_pre_c = Pw_pre.clone()
+            # Pw_pre_c[torch.arange(end=len(tag)), tag] -= 999999999
+            max_p, _ = torch.max(Pw_pre, 1)
+            loss_step = mask[i].float() * (max_p - Pw)
+            loss += loss_step
+            i += 1
+        return loss

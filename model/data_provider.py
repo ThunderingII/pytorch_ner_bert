@@ -33,8 +33,7 @@ class BBNDataset(tud.Dataset):
 
 
 class BBNDatasetCombine(tud.Dataset):
-    def __init__(self, input_dir, get_indexs=None, num=1, limit=0, kw=True,
-                 from_one_file=True):
+    def __init__(self, input_dir, limit=0, from_one_file=True):
         self.data = []
         inputs = []
         log = bu.get_logger()
@@ -43,19 +42,16 @@ class BBNDatasetCombine(tud.Dataset):
             inputs.append(input_dir)
         else:
             for input_file in os.listdir(input_dir):
-                if kw:
-                    str_for_mod = input_file.split('.pkl')[0]
-                else:
-                    str_for_mod = input_file
-                if num <= 1 or bu.get_str_index(str_for_mod,
-                                                num) in get_indexs:
-                    inputs.append(input_dir + '/' + input_file)
-
-        one_file_limit = limit // len(inputs)
+                file_path = input_dir + '/' + input_file
+                if os.path.isfile(file_path):
+                    inputs.append(file_path)
+        if from_one_file:
+            one_file_limit = limit
+        else:
+            one_file_limit = limit // len(inputs)
         for input_file in inputs:
             if one_file_limit > 0 and len(self.data) >= limit:
                 break
-
             with open(input_file, 'rb') as wfd:
                 log.info(input_file)
                 if one_file_limit > 0:
