@@ -1,35 +1,11 @@
 import os
 import torch
-import numpy as np
 import pickle
+import numpy as np
+
 import torch.utils.data as tud
 
-DATA_DIR = '../../data'
-BERT_IDR = '../../bert'
-
-LIMITED = 0
 import util.base_util as bu
-
-
-class BBNDataset(tud.Dataset):
-    def __init__(self, mode, limit=0):
-        with open(
-                DATA_DIR + f'/processed/{mode}_{limit}_wfd.pkl',
-                'rb') as wfd:
-            self.word_flag_data = pickle.load(wfd)
-        with open(
-                DATA_DIR + f'/processed/{mode}_{limit}_wbd.pkl',
-                'rb') as wbd:
-            self.word_bert_emb_data = pickle.load(wbd)
-
-    def __getitem__(self, index):
-        # index, words, words_emb_bert, tags, len_w
-        i, words, tags, len_w = self.word_flag_data[index]
-        words_emb_bert = self.word_bert_emb_data[index]
-        return (i, words, words_emb_bert, tags, len_w)
-
-    def __len__(self):
-        return len(self.word_flag_data)
 
 
 class BBNDatasetCombine(tud.Dataset):
@@ -74,10 +50,13 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
     Used to process data when generate a batch
     :param model: model to load embedding
     :param bert_dim: bert dim
-    :param word_to_ix: map, word to id
     :param tag_to_ix: map, tag to id
-    :param batch: origin data from dataset
-    :return: batched data
+    :param word_to_ix: map, word to id
+    :param rw: if true return tokens
+    :param batch: input data
+    :return:
+    origin_tags, words_batch, bert_ids_batch,
+    len_w_batch, tags_batch,sentences_batch
     """
     batch_size = len(batch)
     len_w_batch = np.zeros((batch_size,), dtype=np.int64)
@@ -92,18 +71,18 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
 
     # sort the array by length, sort the len_w by length
     # ([10,2,5],[0,1,2]) after sort ([10,5,2],[0,2,1])
-    rz = zip(len_w_batch, [i for i in range(len(len_w_batch))])
+    rz = zip(len_w_batch, range(len(len_w_batch)))
     r = sorted(rz, key=lambda item: item[0], reverse=True)
     _, index_list = zip(*r)
 
     bert_embedding = np.zeros((len_summed + 1, bert_dim))
 
-    origin_tags = [None for _ in range(batch_size)]
+    origin_tags = [None] * batch_size
 
     if word_to_ix:
         words_batch = np.zeros((batch_size, max_len), dtype=np.int64)
     else:
-        words_batch = [None for _ in range(batch_size)]
+        words_batch = [None] * batch_size
     words_ids_batch = np.zeros((batch_size, max_len), dtype=np.int64)
     tags_batch = np.zeros((batch_size, max_len), dtype=np.int64)
 

@@ -98,4 +98,4 @@ def get_fpr(correct_preds, total_correct, total_preds):
     p = correct_preds / total_preds if correct_preds > 0 else 0
     r = correct_preds / total_correct if correct_preds > 0 else 0
     f1 = 2 * p * r / (p + r) if correct_preds > 0 else 0
-    return {"f1": f1, 'presision': p, 'recall': r}
+    return {"f1": f1, 'precision': p, 'recall': r}
