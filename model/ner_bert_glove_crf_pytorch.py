@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import model.transformer as transformer
-import model.crf_o as crf
+import model.crf as crf
 
 torch.manual_seed(2019)
 
@@ -222,7 +222,7 @@ class Bert_CRF(nn.Module):
             # tags = tags.transpose(0, 1)
             # return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
             tags = tags.transpose(0, 1)
-            return self.crf.get_labelwise_loss(feats, tags, mask_x, len_w)
+            return self.crf.crf_log_loss(feats, tags, mask_x, len_w)
 
     def forward(self, words, words_ids, len_w):
         # Get the emission scores from the BiLSTM
