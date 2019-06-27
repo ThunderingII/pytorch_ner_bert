@@ -58,8 +58,8 @@ def main():
     log = bu.get_logger(model_time_str)
 
     log.info('begin predict')
-    fn_model = params['checkpoint'] + f'/{args.model_name}_config.pkl'
-    fn_config = params['checkpoint'] + f'/{args.model_name}_torch.pkl'
+    fn_model = params['checkpoint'] + f'/{args.model_name}_torch.pkl'
+    fn_config = params['checkpoint'] + f'/{args.model_name}_config.pkl'
     with Path(fn_model).open('rb') as mp:
         if args.gpu_index < 0:
             ml = 'cpu'
@@ -92,7 +92,11 @@ def main():
 
 
 def get_entity(entity, text):
-    m = re.search(entity.replace('[UNK]', '.'), text)
+    try:
+        m = re.search(entity.replace('[UNK]', '.'), text)
+    except:
+        print(entity, text)
+        m = None
     if m:
         entity = m.group()
     return entity
@@ -177,7 +181,6 @@ def evaluate(collate_fn, model, args, tag_to_ix=None, idx_to_tag=None,
                                 if text_not_in:
                                     ss_error.append(text)
                                     text_not_in = False
-
                                 ts = []
                                 ps = []
                                 for c in set_map[k][1] - set_map[k][0]:
@@ -192,8 +195,6 @@ def evaluate(collate_fn, model, args, tag_to_ix=None, idx_to_tag=None,
                                     f'{k}: tc:{set_map[k][0]}, pc:{set_map[k][1]}')
                                 ss_error.append(f'{k}: true:{ts}')
                                 ss_error.append(f'{k}: pre:{ps}')
-                        ss_error.append('\n')
-
                     pre_tags = [idx_to_tag[tid] for tid in p[i]]
                     if get_loss:
                         for a, b, c in zip(w[i][:len(ot)], ot,

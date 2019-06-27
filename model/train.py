@@ -75,8 +75,10 @@ def main():
                         type=float, default=0.1)
     parser.add_argument('--lr', help="learning rate",
                         type=float, default=3e-4)
+    parser.add_argument('--lr_times', help="learning rate decay times",
+                        type=int, default=0)
     parser.add_argument('--wd', help="weight decay",
-                        type=float, default=5e-4)
+                        type=float, default=1e-3)
     parser.add_argument('--head_num', help="set the head num",
                         type=int, default=8)
     parser.add_argument('--vip', help="the ip or domain of visdom server",
@@ -170,7 +172,6 @@ def main():
     Path(params['checkpoint']).mkdir(parents=True, exist_ok=True)
     monitor_best = 0
     wait = 0
-    best_state_dict = None
     loss_train_epoch = []
     loss_valid_epoch = []
     loss_train_t = []
@@ -178,6 +179,8 @@ def main():
     criterion_key = ['f1', 'precision', 'recall']
     criterion_map = {}
 
+    lr_times = args.lr_times
+    lr = args.lr
     for epoch in range(args.epochs):
         loss_train = []
 
@@ -260,16 +263,23 @@ def main():
             wait += 1
         if (epoch + 1) % 5 == 0:
             temp_name = f't_{args.model_name}_{epoch+1}'
-            save_mode(best_state_dict, params, tag_to_ix, temp_name)
+            save_mode(model.state_dict(), params, tag_to_ix, temp_name)
         if wait > 8:
-            log.warn(f'meat early stopping! best score is {monitor_best}')
-            break
+            if lr_times:
+                lr_times -= 1
+                wait = 3
+                lr /= 3
+                optimizer = optim.Adam(model.parameters(), lr=lr,
+                                       weight_decay=args.wd)
+            else:
+                log.warn(f'meat early stopping! best score is {monitor_best}')
+                break
         log.info('finish train')
 
 
 def save_mode(best_state_dict, params, tag_to_ix, model_name):
-    fn_model = params['checkpoint'] + f'/{model_name}_config.pkl'
-    fn_config = params['checkpoint'] + f'/{model_name}_torch.pkl'
+    fn_config = params['checkpoint'] + f'/{model_name}_config.pkl'
+    fn_model = params['checkpoint'] + f'/{model_name}_torch.pkl'
     with open(fn_model, 'wb') as f:
         torch.save(best_state_dict, f)
     with open(fn_config, 'wb') as f:

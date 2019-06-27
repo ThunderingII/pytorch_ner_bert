@@ -86,7 +86,7 @@ def collect_fn(model, bert_dim, tag_to_ix, word_to_ix, rw, batch):
     words_ids_batch = np.zeros((batch_size, max_len), dtype=np.int64)
     tags_batch = np.zeros((batch_size, max_len), dtype=np.int64)
 
-    sentences_batch = [None for i in range(batch_size)]
+    sentences_batch = [None] * batch_size
     for ni, bi in enumerate(index_list):
         _, words, words_emb_bert, tags, len_w, sentence = batch[bi]
         for i in range(len_w):

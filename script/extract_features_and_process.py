@@ -1,19 +1,3 @@
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors and The HugginFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""Extract pre-computed feature vectors from a PyTorch BERT model."""
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -23,6 +7,7 @@ import argparse
 import collections
 import re
 import multiprocessing
+import json
 
 import pickle
 import numpy as np
@@ -39,7 +24,6 @@ from pytorch_pretrained_bert.modeling import BertModel
 import util.base_util as bu
 
 logger = bu.get_logger(__name__)
-PA_PATTERN = re.compile('\d+,\s\d+')
 CUDA_ID_PATTERN = re.compile('(\d+,)*\d+')
 
 MODEL_PATH = '../config/bert/bert-base-chinese.tar.gz'
@@ -51,95 +35,48 @@ LIMITED = 0
 
 class InputExample(object):
 
-    def __init__(self, unique_id, text_a, orgs, pers, text_b=None):
+    def __init__(self, unique_id, text, entity_map):
         self.unique_id = unique_id
-        self.text_a = text_a
-        self.text_b = text_b
-        self.orgs = orgs
-        self.pers = pers
+        self.text = text
+        self.entity_map = entity_map
 
 
 class InputFeatures(object):
     """A single set of features of data."""
 
     def __init__(self, unique_id, tokens, input_ids, input_mask,
-                 input_type_ids, orgs, pers, sentence):
+                 input_type_ids, entity_map, sentence):
         self.unique_id = unique_id
         self.tokens = tokens
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.input_type_ids = input_type_ids
-        self.orgs = orgs
-        self.pers = pers
+        self.entity_map = entity_map
         self.sentence = sentence
 
 
-def convert_examples_to_features(examples, seq_length, tokenizer):
+def convert_examples_to_features(examples, seq_length, tokenizer, lower_case):
     """Loads a data file into a list of `InputBatch`s."""
-
     features = []
     for (ex_index, example) in enumerate(examples):
-        tokens_a = tokenizer.tokenize(example.text_a)
-
-        tokens_b = None
-        if example.text_b:
-            tokens_b = tokenizer.tokenize(example.text_b)
-
-        if tokens_b:
-            # Modifies `tokens_a` and `tokens_b` in place so that the total
-            # length is less than the specified length.
-            # Account for [CLS], [SEP], [SEP] with "- 3"
-            _truncate_seq_pair(tokens_a, tokens_b, seq_length - 3)
-        else:
-            # Account for [CLS] and [SEP] with "- 2"
-            if len(tokens_a) > seq_length - 2:
-                tokens_a = tokens_a[0:(seq_length - 2)]
-
-        # The convention in BERT is:
-        # (a) For sequence pairs:
-        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
-        #  type_ids:   0   0  0    0    0     0      0   0    1  1  1   1  1   1
-        # (b) For single sequences:
-        #  tokens:   [CLS] the dog is hairy . [SEP]
-        #  type_ids:   0   0   0   0  0     0   0
-        #
-        # Where "type_ids" are used to indicate whether this is the first
-        # sequence or the second sequence. The embedding vectors for `type=0` and
-        # `type=1` were learned during pre-training and are added to the wordpiece
-        # embedding vector (and position vector). This is not *strictly* necessary
-        # since the [SEP] token unambigiously separates the sequences, but it makes
-        # it easier for the model to learn the concept of sequences.
-        #
-        # For classification tasks, the first vector (corresponding to [CLS]) is
-        # used as as the "sentence vector". Note that this only makes sense because
-        # the entire model is fine-tuned.
-        orgs = _get_tag_position(example.text_a, example.orgs, tokens_a)
-        pers = _get_tag_position(example.text_a, example.pers, tokens_a)
-
+        origin_tokens = tokenizer.tokenize(example.text)
+        # Account for [CLS] and [SEP] with "- 2"
+        if len(origin_tokens) > seq_length - 2:
+            origin_tokens = origin_tokens[0:(seq_length - 2)]
+        entity_map = _get_entity(example.text, example.entity_map, lower_case,
+                                 tokenizer)
         tokens = []
         input_type_ids = []
         tokens.append("[CLS]")
         input_type_ids.append(0)
-        for token in tokens_a:
+        for token in origin_tokens:
             tokens.append(token)
             input_type_ids.append(0)
         tokens.append("[SEP]")
         input_type_ids.append(0)
 
-        if tokens_b:
-            for token in tokens_b:
-                tokens.append(token)
-                input_type_ids.append(1)
-            tokens.append("[SEP]")
-            input_type_ids.append(1)
-
         input_ids = tokenizer.convert_tokens_to_ids(tokens)
-
-        # The mask has 1 for real tokens and 0 for padding tokens. Only real
-        # tokens are attended to.
         input_mask = [1] * len(input_ids)
-
-        # Zero-pad up to the sequence length.
         while len(input_ids) < seq_length:
             input_ids.append(0)
             input_mask.append(0)
@@ -148,7 +85,6 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
         assert len(input_ids) == seq_length
         assert len(input_mask) == seq_length
         assert len(input_type_ids) == seq_length
-
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("unique_id: %s" % (example.unique_id))
@@ -160,7 +96,6 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
             logger.info(
                 "input_type_ids: %s" % " ".join(
                     [str(x) for x in input_type_ids]))
-
         features.append(
             InputFeatures(
                 unique_id=example.unique_id,
@@ -168,44 +103,26 @@ def convert_examples_to_features(examples, seq_length, tokenizer):
                 input_ids=input_ids,
                 input_mask=input_mask,
                 input_type_ids=input_type_ids,
-                orgs=orgs,
-                pers=pers,
-                sentence=example.text_a))
+                entity_map=entity_map,
+                sentence=example.text))
     return features
 
 
-def _get_tag_position(text, tag_position_list, tokens):
-    rl = []
-    for s, e in tag_position_list:
-        e = e - 1
-        for ts in range(0, s + 1)[::-1]:
-            te = ts + e - s
-            try:
-                if te < len(tokens) and tokens[ts] == text[s] and \
-                        tokens[te] == text[e]:
-                    rl.append((ts, te + 1))
-                    break
-            except:
-                pass
-
-    return rl
-
-
-def _truncate_seq_pair(tokens_a, tokens_b, max_length):
-    """Truncates a sequence pair in place to the maximum length."""
-
-    # This is a simple heuristic which will always truncate the longer sequence
-    # one token at a time. This makes more sense than truncating an equal percent
-    # of tokens from each, since if one sequence is very short then each token
-    # that's truncated likely contains more information than a longer sequence.
-    while True:
-        total_length = len(tokens_a) + len(tokens_b)
-        if total_length <= max_length:
-            break
-        if len(tokens_a) > len(tokens_b):
-            tokens_a.pop()
-        else:
-            tokens_b.pop()
+def _get_entity(text, entity_index_map, lower_case, tokenizer):
+    entity_map = {}
+    entity2tokens = {}
+    if lower_case:
+        text = text.lower()
+    #     tokenizer.tokenize(example.text)
+    # k is tag type
+    for k in entity_index_map:
+        entity_map[k] = []
+        for s, e in entity_index_map[k]:
+            entity = text[s:e]
+            if entity not in entity2tokens:
+                entity2tokens[entity] = tokenizer.tokenize(text[s:e])
+                entity_map[k].append(entity2tokens[entity])
+    return entity_map
 
 
 def _get_pair_list(s_list):
@@ -216,7 +133,7 @@ def _get_pair_list(s_list):
     return rs
 
 
-def read_examples(input_file, mode):
+def read_examples(input_file, entity_types, mode):
     """Read a list of `InputExample`s from an input file."""
     examples = []
     unique_id = 0
@@ -225,38 +142,29 @@ def read_examples(input_file, mode):
     with open(input_file, "r", encoding='utf-8') as reader:
         while limit < 0 or limit > 0:
             limit -= 1
-            line = reader.readline()
+            line = reader.readline().strip()
             lmd5 = bu.md5(line)
             if not line:
                 break
-            tagline = None
+            tag_str = None
             if mode_is_train:
-                tagline = reader.readline()
-
+                tag_str = reader.readline().strip()
             if lmd5 in DATA_SET:
                 continue
             else:
                 DATA_SET.add(lmd5)
+            entity_map = {}
             if mode_is_train:
-                try:
-                    org_str, per_str = tagline.split('][')
-                except:
-                    tagline = reader.readline()
-                    if tagline and '][' in tagline:
-                        org_str, per_str = tagline.split('][')
-                    else:
-                        continue
-                orgs = _get_pair_list(PA_PATTERN.findall(org_str))
-
-                pers = _get_pair_list(PA_PATTERN.findall(per_str))
-            else:
-                orgs = []
-                pers = []
-
-            examples.append(
-                InputExample(unique_id=unique_id, text_a=line, orgs=orgs,
-                             pers=pers))
-            unique_id += 1
+                entity_map = json.loads(tag_str, encoding='UTF-8')
+                keys_to_del = [key for key in entity_map if
+                               key not in entity_types]
+                for k in keys_to_del:
+                    del entity_map[k]
+            if entity_map:
+                examples.append(
+                    InputExample(unique_id=unique_id, text=line,
+                                 entity_map=entity_map))
+                unique_id += 1
     return examples
 
 
@@ -303,7 +211,7 @@ def process_embedding(all_encoder_layers, example_indices, features,
                 t = np.sum(all_layers, axis=0)
             seq_embed.append(t)
             seq_tokens.append(token)
-        rs = process_token(seq_embed, feature.orgs, feature.pers, seq_tokens)
+        rs = process_token(seq_embed, feature.entity_map, seq_tokens)
         if rs:
             embedding_e, token_e, tag_e, len_w = rs
             yield unique_id, embedding_e, token_e, tag_e, len_w, feature.sentence
@@ -311,10 +219,12 @@ def process_embedding(all_encoder_layers, example_indices, features,
             continue
 
 
-def process_token(line_embedding, tags_orgs, tags_pers, line_tokens):
+def process_token(line_embedding, entity_map, line_tokens):
     embedding_e = []
     tag_e = []
     token_e = []
+    START_INDEX = 1
+    END_INDEX = len(line_tokens) - 2
     for i in range(len(line_tokens)):
         if i == 0 or i == len(line_tokens) - 1:
             # remove [CLS] and [SEP]
@@ -329,16 +239,28 @@ def process_token(line_embedding, tags_orgs, tags_pers, line_tokens):
         else:
             embedding_e.append(current_word_emb)
             token_e.append(token)
-            for s, e in tags_orgs:
-                if s == i - 1:
-                    tag_e.append('B-ORG')
-                elif s < i - 1 and i - 1 < e:
-                    tag_e.append('I-ORG')
-            for s, e in tags_pers:
-                if s == i - 1:
-                    tag_e.append('B-PER')
-                elif s < i - 1 and i - 1 < e:
-                    tag_e.append('I-PER')
+            has_append = False
+            for k in entity_map:
+                if has_append:
+                    break
+                for e_li in entity_map[k]:
+                    if has_append:
+                        break
+                    for j in range(len(e_li)):
+                        if has_append:
+                            break
+                        if token == e_li[j]:
+                            ei = i + len(e_li) - j - 1
+                            si = i - j
+                            if si >= START_INDEX and ei <= END_INDEX:
+                                if line_tokens[si] == e_li[0] and line_tokens[
+                                    ei] == e_li[-1]:
+                                    if j == 0:
+                                        tag_e.append(f'B-{k}')
+                                    else:
+                                        tag_e.append(f'I-{k}')
+                                    has_append = True
+                                    break
             if len(tag_e) < len(token_e):
                 tag_e.append('O')
 
@@ -353,7 +275,7 @@ def process_token(line_embedding, tags_orgs, tags_pers, line_tokens):
         print(e)
         print('line_embedding', len(line_embedding[1:-1]))
         print(line_tokens[1:-1])
-        print(tags_orgs, tags_pers)
+        print(entity_map)
         print('token:', len(token_e), token_e)
         print('tag_e:', len(tag_e), tag_e)
         print('em', len(embedding_e))
@@ -369,8 +291,12 @@ def main():
                         help='input file or input dir')
     parser.add_argument("--output_file", type=str,
                         help='output file or output dir')
+    parser.add_argument("--entity_types", type=str, default='ORG',
+                        help='the types need processed, like "ORG,PER", use '
+                             '"," to connect str')
+
     ## Other parameters
-    parser.add_argument("--do_lower_case", action='store_true',
+    parser.add_argument("--not_do_lower_case", action='store_false',
                         help="Set this flag if you are using an uncased model.")
     parser.add_argument("--layers", default="-1,-2,-3,-4", type=str)
     parser.add_argument("--max_seq_length", default=128, type=int,
@@ -434,7 +360,7 @@ def main():
     layer_indexes = [int(x) for x in args.layers.split(",")]
 
     tokenizer = BertTokenizer.from_pretrained(VOCAB_PATH,
-                                              do_lower_case=args.do_lower_case)
+                                              do_lower_case=args.not_do_lower_case)
     model = BertModel.from_pretrained(MODEL_PATH)
     model.to(device)
 
@@ -465,11 +391,12 @@ def main():
     if len(inputs) > 0:
         LIMITED //= len(inputs)
     ti = 0
+    entity_types = set(args.entity_types.split(','))
     for input_file, output_file in zip(inputs, outputs):
-        examples = read_examples(input_file, args.mode)
+        examples = read_examples(input_file, entity_types, args.mode)
         features = convert_examples_to_features(
             examples=examples, seq_length=args.max_seq_length,
-            tokenizer=tokenizer)
+            tokenizer=tokenizer, lower_case=args.not_do_lower_case)
 
         unique_id_to_feature = {}
         for feature in features:

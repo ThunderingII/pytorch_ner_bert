@@ -1,7 +1,7 @@
 import os
+import pathlib
 
-print(os.getcwd())
-#
+os.system(f'export PYTHONPATH={pathlib.Path(os.getcwd()).parent}')
 
 if __name__ == '__main__':
     cmd = 'nohup python train.py' \
